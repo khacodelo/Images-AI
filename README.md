@@ -143,6 +143,4 @@ ai-image-saver/
 - Không tự thử lại khi gặp lỗi mạng hoặc lỗi máy chủ; người dùng bấm tạo lại.
 - Chưa có bộ kiểm thử tự động trong repo.
 
-## Giấy phép
 
-Chưa khai báo. Thêm tệp `LICENSE` phù hợp trước khi công khai.

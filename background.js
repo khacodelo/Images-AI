@@ -24,20 +24,28 @@ const BADGE = {
   SAVING: ['…', '#2457F5'], DONE: ['✓', '#17855A'], ERROR: ['!', '#C23B2E'], CANCELLED: ['', '#000']
 };
 
-// ───────────────────────── Cấu hình Beeknoee ─────────────────────────
+// ───────────────────────── Cấu hình Beeknoee (FLUX 3 Image Klein) ─────────────────────────
 const BEE_ORIGIN = 'https://platform.beeknoee.com';
 const DEFAULTS = {
   apiKey: '',
   baseUrl: BEE_ORIGIN,
-  model: 'recraft/recraft-v4.1-flash-v2', // ~$0.011 / ảnh
+  model: 'black-forest-labs/flux-3-image-klein',
   aspect: '1:1',
+  resolution: '1K',
+  outputFormat: 'png',
   folder: 'AI-Images'
 };
-const ASPECTS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'];
+const ASPECTS = [
+  '1:1', '16:9', '21:9', '2:1', '3:2', '7:5', '4:3', '5:4',
+  '4:5', '3:4', '5:7', '2:3', '9:16', '1:2', '9:21'
+];
+const RESOLUTIONS = ['768', '1K', '1.5K', '2K', '4K'];
+const OUTPUT_FORMATS = ['png', 'jpeg', 'webp'];
 const HISTORY_MAX = 50;
 const POLL_INTERVAL_MS = 5000;
 const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 const EXT_BY_MIME = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/svg+xml': 'svg' };
+const EXT_BY_FORMAT = { png: 'png', jpeg: 'jpg', webp: 'webp' };
 
 let current = null; // { controller, timedOut }
 
@@ -113,6 +121,8 @@ async function validate(prompt, s) {
   if (!prompt || prompt.trim().length < 3) return 'Mô tả ảnh quá ngắn (tối thiểu 3 ký tự).';
   if (prompt.length > 4000) return 'Mô tả ảnh quá dài (tối đa 4000 ký tự).';
   if (!ASPECTS.includes(s.aspect)) return 'Tỉ lệ khung hình không hợp lệ.';
+  if (!RESOLUTIONS.includes(s.resolution)) return 'Độ phân giải không hợp lệ.';
+  if (!OUTPUT_FORMATS.includes(s.outputFormat)) return 'Định dạng ảnh không hợp lệ.';
   let url;
   try { url = new URL(s.baseUrl); } catch { return 'Base URL không hợp lệ.'; }
   if (url.protocol !== 'https:') return 'Base URL phải dùng https.';
@@ -123,9 +133,43 @@ async function validate(prompt, s) {
   return null;
 }
 
+// Chuyển đổi định dạng ảnh sang đúng outputFormat bằng OffscreenCanvas nếu API trả về MIME khác (ví dụ WebP/PNG).
+async function ensureFormat(dataUrl, mime, targetFormat) {
+  const targetMime = targetFormat === 'jpeg' ? 'image/jpeg'
+    : targetFormat === 'webp' ? 'image/webp'
+    : 'image/png';
+  if (mime === targetMime || mime === 'image/svg+xml') {
+    return { dataUrl, mime };
+  }
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    const bmp = await createImageBitmap(blob);
+    const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+    const ctx = canvas.getContext('2d');
+    if (targetMime === 'image/jpeg') {
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, bmp.width, bmp.height);
+    }
+    ctx.drawImage(bmp, 0, 0);
+    const quality = targetMime === 'image/png' ? undefined : 0.92;
+    const out = await canvas.convertToBlob({ type: targetMime, quality });
+    return {
+      dataUrl: `data:${targetMime};base64,${toBase64(await out.arrayBuffer())}`,
+      mime: targetMime
+    };
+  } catch {
+    return { dataUrl, mime };
+  }
+}
+
 // Lấy dữ liệu ảnh: hỗ trợ b64_json, đường dẫn tải của Beeknoee (cần Authorization) và URL tuyệt đối.
-async function fetchImage(item, base, headers, signal) {
-  if (item.b64_json) return { dataUrl: `data:image/png;base64,${item.b64_json}`, mime: 'image/png' };
+async function fetchImage(item, base, headers, signal, targetFormat) {
+  if (item.b64_json) {
+    const rawMime = targetFormat === 'jpeg' ? 'image/jpeg'
+      : targetFormat === 'webp' ? 'image/webp'
+      : 'image/png';
+    return { dataUrl: `data:${rawMime};base64,${item.b64_json}`, mime: rawMime };
+  }
   if (!item.url) throw new Error('API không trả về dữ liệu ảnh.');
 
   const candidates = item.url.startsWith('/') ? [`${base}${item.url}`, `${base}/api${item.url}`] : [item.url];
@@ -134,7 +178,8 @@ async function fetchImage(item, base, headers, signal) {
     const res = await fetch(url, { headers: url.startsWith(base) ? headers : {}, signal });
     if (res.ok) {
       const mime = (res.headers.get('content-type') || 'image/png').split(';')[0].trim();
-      return { dataUrl: `data:${mime};base64,${toBase64(await res.arrayBuffer())}`, mime };
+      const rawDataUrl = `data:${mime};base64,${toBase64(await res.arrayBuffer())}`;
+      return ensureFormat(rawDataUrl, mime, targetFormat);
     }
     lastError = await readApiError(res);
   }
@@ -198,12 +243,19 @@ async function startJob(prompt) {
   const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(), 20000);
 
   try {
-    // 1. Gửi yêu cầu tạo ảnh
+    // 1. Gửi yêu cầu tạo ảnh với model, prompt, aspect_ratio, resolution, output_format
+    const payload = {
+      model: settings.model,
+      prompt: prompt.trim(),
+      aspect_ratio: settings.aspect,
+      resolution: settings.resolution,
+      output_format: settings.outputFormat
+    };
     const res = await fetch(`${base}/v1/image/generations`, {
       method: 'POST',
       signal,
       headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: settings.model, prompt: prompt.trim(), aspect_ratio: settings.aspect })
+      body: JSON.stringify(payload)
     });
     if (!res.ok) throw new Error(await readApiError(res));
     let result = await res.json();
@@ -222,23 +274,25 @@ async function startJob(prompt) {
 
     const item = result.data?.[0];
     if (!item) throw new Error('API không trả về ảnh.');
-    const { dataUrl, mime } = await fetchImage(item, base, headers, signal);
+    const { dataUrl, mime } = await fetchImage(item, base, headers, signal, settings.outputFormat);
     await transition('RECEIVED');
 
     // 3. Lưu tệp vào Tải xuống
-    const ext = EXT_BY_MIME[mime] ?? 'png';
+    const ext = EXT_BY_MIME[mime] ?? EXT_BY_FORMAT[settings.outputFormat] ?? 'png';
     const folder = settings.folder.replace(/[^\w\- ]/g, '').trim();
     const filename = `${folder ? folder + '/' : ''}${slugify(prompt)}-${timestamp()}.${ext}`;
     const id = await chrome.downloads.download({ url: dataUrl, filename, conflictAction: 'uniquify', saveAs: false });
     await waitForDownload(id);
     const [saved] = await chrome.downloads.search({ id });
 
-    try { await chrome.storage.session.set({ preview: dataUrl }); } catch { /* ảnh quá lớn cho session storage */ }
+    try { await chrome.storage.session.set({ preview: dataUrl }); } catch { /* ảnh quá lớn (4K) cho session storage */ }
     try {
       await addHistory({
         id: crypto.randomUUID(),
         prompt: prompt.trim(),
         aspect: settings.aspect,
+        resolution: settings.resolution,
+        outputFormat: settings.outputFormat,
         model: settings.model,
         cost: result.cost_vnd ?? null,
         savedTo: saved?.filename ?? filename,

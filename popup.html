@@ -23,16 +23,48 @@
   <textarea id="prompt" rows="4" placeholder="Ví dụ: chợ nổi buổi sáng trên sông Hậu, màu nước. Hoặc bôi đen văn bản trên trang rồi mở popup."></textarea>
   <p id="selNote" class="meta" hidden></p>
 
+  <div class="options-grid">
+    <div>
+      <label for="aspect">Tỉ lệ khung hình</label>
+      <select id="aspect" aria-label="Tỉ lệ khung hình">
+        <option value="1:1">1:1 (Vuông)</option>
+        <option value="16:9">16:9 (Ngang rộng)</option>
+        <option value="21:9">21:9 (Siêu rộng)</option>
+        <option value="2:1">2:1 (Ngang 2:1)</option>
+        <option value="3:2">3:2 (Ngang ảnh)</option>
+        <option value="7:5">7:5 (Ngang 7:5)</option>
+        <option value="4:3">4:3 (Ngang 4:3)</option>
+        <option value="5:4">5:4 (Ngang 5:4)</option>
+        <option value="4:5">4:5 (Dọc 4:5)</option>
+        <option value="3:4">3:4 (Dọc 3:4)</option>
+        <option value="5:7">5:7 (Dọc 5:7)</option>
+        <option value="2:3">2:3 (Dọc ảnh)</option>
+        <option value="9:16">9:16 (Dọc story)</option>
+        <option value="1:2">1:2 (Dọc 1:2)</option>
+        <option value="9:21">9:21 (Siêu dọc)</option>
+      </select>
+    </div>
+    <div>
+      <label for="resolution">Độ phân giải</label>
+      <select id="resolution" aria-label="Độ phân giải">
+        <option value="768">768 (~330đ)</option>
+        <option value="1K">1K (~371đ)</option>
+        <option value="1.5K">1.5K (~454đ)</option>
+        <option value="2K">2K (~578đ)</option>
+        <option value="4K">4K (~1.485đ)</option>
+      </select>
+    </div>
+    <div>
+      <label for="outputFormat">Định dạng</label>
+      <select id="outputFormat" aria-label="Định dạng ảnh">
+        <option value="png">PNG</option>
+        <option value="jpeg">JPEG</option>
+        <option value="webp">WEBP</option>
+      </select>
+    </div>
+  </div>
+
   <div class="row">
-    <select id="aspect" aria-label="Tỉ lệ khung hình">
-      <option value="1:1">Vuông 1:1</option>
-      <option value="16:9">Ngang 16:9</option>
-      <option value="4:3">Ngang 4:3</option>
-      <option value="3:2">Ngang 3:2</option>
-      <option value="9:16">Dọc 9:16</option>
-      <option value="3:4">Dọc 3:4</option>
-      <option value="2:3">Dọc 2:3</option>
-    </select>
     <button id="generate" class="primary">Tạo và lưu</button>
     <button id="cancel" hidden>Hủy</button>
   </div>

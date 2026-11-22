@@ -12,7 +12,7 @@
 }
 * { box-sizing: border-box; }
 body {
-  width: 360px; margin: 0; padding: 14px;
+  width: 380px; margin: 0; padding: 14px;
   background: var(--bg); color: var(--ink);
   font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
@@ -40,14 +40,32 @@ textarea, input, select {
   width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line);
   background: var(--panel); color: var(--ink); font: inherit;
 }
-textarea { resize: vertical; min-height: 84px; }
+textarea { resize: vertical; min-height: 80px; }
 button {
   padding: 8px 12px; border-radius: 6px; border: 1px solid var(--line);
   background: var(--panel); color: var(--ink); font: inherit; cursor: pointer;
 }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; white-space: nowrap; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; white-space: nowrap; flex: 1; }
 button:disabled { opacity: .5; cursor: not-allowed; }
 :is(button, input, select, textarea, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.options-grid {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr 0.85fr;
+  gap: 6px;
+  margin-top: 2px;
+}
+.options-grid label {
+  margin-top: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.options-grid select {
+  padding: 7px 6px;
+  font-size: 12.5px;
+}
+
 .row { display: flex; gap: 8px; margin-top: 10px; }
 .row select { flex: 1; min-width: 0; }
 .error { color: var(--err); margin: 10px 0 0; }

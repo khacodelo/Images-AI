@@ -7,8 +7,14 @@ const LABEL = {
   SAVING: 'Đang lưu', DONE: 'Đã lưu', ERROR: 'Lỗi', CANCELLED: 'Đã hủy'
 };
 const DEFAULTS = {
-  apiKey: '', baseUrl: BEE_ORIGIN, model: 'recraft/recraft-v4.1-flash-v2',
-  aspect: '1:1', folder: 'AI-Images', draft: ''
+  apiKey: '',
+  baseUrl: BEE_ORIGIN,
+  model: 'black-forest-labs/flux-3-image-klein',
+  aspect: '1:1',
+  resolution: '1K',
+  outputFormat: 'png',
+  folder: 'AI-Images',
+  draft: ''
 };
 
 const send = (msg) => chrome.runtime.sendMessage(msg);
@@ -21,8 +27,6 @@ function clip(text) {
   return t;
 }
 
-// Đọc đoạn đang chọn ở tab hiện tại (cần quyền activeTab + scripting).
-// Trang hệ thống (chrome://, Web Store…) không cho đọc → trả về chuỗi rỗng.
 async function getPageSelection() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -33,7 +37,7 @@ async function getPageSelection() {
         try {
           const sel = String(window.getSelection?.() ?? '');
           if (sel.trim()) return sel;
-          const a = document.activeElement; // bôi đen bên trong ô nhập liệu
+          const a = document.activeElement;
           if (a && typeof a.selectionStart === 'number' && a.selectionEnd > a.selectionStart) {
             return a.value.slice(a.selectionStart, a.selectionEnd);
           }
@@ -60,7 +64,6 @@ function setPromptFromSelection(raw) {
     : `Đã lấy ${raw.length} ký tự từ đoạn đang chọn trên trang.`;
 }
 
-// Mở popup: nếu có đoạn mới được bôi đen (khác lần trước) thì điền vào ô mô tả.
 async function applyPageSelection(job) {
   if (ACTIVE.includes(job?.state)) return;
   const raw = await getPageSelection();
@@ -90,6 +93,9 @@ function render(job = { state: 'IDLE' }, preview) {
   const busy = ACTIVE.includes(state);
   $('#generate').disabled = busy;
   $('#prompt').disabled = busy;
+  $('#aspect').disabled = busy;
+  $('#resolution').disabled = busy;
+  $('#outputFormat').disabled = busy;
   $('#cancel').hidden = state !== 'REQUESTING';
 
   const elapsed = $('#elapsed');
@@ -118,10 +124,18 @@ async function refresh() {
   render(job, preview);
 }
 
+function setSelectSafe(selector, val, fallback) {
+  const el = $(selector);
+  el.value = val;
+  if (!el.value) el.value = fallback;
+}
+
 async function init() {
   const s = await chrome.storage.local.get(DEFAULTS);
   for (const k of ['apiKey', 'baseUrl', 'model', 'folder']) $('#' + k).value = s[k];
-  $('#aspect').value = s.aspect;
+  setSelectSafe('#aspect', s.aspect, DEFAULTS.aspect);
+  setSelectSafe('#resolution', s.resolution, DEFAULTS.resolution);
+  setSelectSafe('#outputFormat', s.outputFormat, DEFAULTS.outputFormat);
   $('#prompt').value = s.draft;
   if (!s.apiKey) $('#settings').open = true;
   const { job } = await chrome.storage.session.get('job');
@@ -139,13 +153,19 @@ $('#prompt').addEventListener('input', (e) => {
   chrome.storage.local.set({ draft: e.target.value });
 });
 $('#aspect').addEventListener('change', (e) => chrome.storage.local.set({ aspect: e.target.value }));
+$('#resolution').addEventListener('change', (e) => chrome.storage.local.set({ resolution: e.target.value }));
+$('#outputFormat').addEventListener('change', (e) => chrome.storage.local.set({ outputFormat: e.target.value }));
 
 $('#generate').addEventListener('click', async () => {
-  if (!$('#prompt').value.trim()) { // ô trống → thử lấy đoạn đang bôi đen trên trang
+  if (!$('#prompt').value.trim()) {
     const raw = await getPageSelection();
     if (raw) setPromptFromSelection(raw);
   }
-  await chrome.storage.local.set({ aspect: $('#aspect').value });
+  await chrome.storage.local.set({
+    aspect: $('#aspect').value,
+    resolution: $('#resolution').value,
+    outputFormat: $('#outputFormat').value
+  });
   await send({ type: 'START', prompt: $('#prompt').value });
 });
 $('#cancel').addEventListener('click', () => send({ type: 'CANCEL' }));
@@ -198,10 +218,12 @@ function historyRow(item, fileExists) {
   else thumb.textContent = 'Ảnh';
   thumb.addEventListener('click', () => chrome.downloads.show(item.downloadId));
 
+  const resTag = item.resolution ? ` · ${item.resolution}` : '';
+  const fmtTag = item.outputFormat ? ` · ${item.outputFormat.toUpperCase()}` : '';
   const cost = item.cost != null ? ` · ${Number(item.cost).toLocaleString('vi-VN')}đ` : '';
   const meta = el('div', {},
     el('p', { className: 'h-prompt', title: item.prompt, textContent: item.prompt }),
-    el('p', { className: 'h-sub', textContent: `${fmtDate(item.createdAt)} · ${item.aspect}${cost}` }));
+    el('p', { className: 'h-sub', textContent: `${fmtDate(item.createdAt)} · ${item.aspect}${resTag}${fmtTag}${cost}` }));
   if (!fileExists) meta.append(el('p', { className: 'h-miss', textContent: 'Không tìm thấy tệp (đã xóa hoặc di chuyển).' }));
 
   const reuse = el('button', { type: 'button', textContent: 'Dùng lại' });
@@ -234,8 +256,15 @@ async function renderHistory() {
 async function reuseItem(item) {
   if ($('#prompt').disabled) return;
   $('#prompt').value = item.prompt;
-  $('#aspect').value = item.aspect;
-  await chrome.storage.local.set({ draft: item.prompt, aspect: item.aspect });
+  setSelectSafe('#aspect', item.aspect, DEFAULTS.aspect);
+  if (item.resolution) setSelectSafe('#resolution', item.resolution, DEFAULTS.resolution);
+  if (item.outputFormat) setSelectSafe('#outputFormat', item.outputFormat, DEFAULTS.outputFormat);
+  await chrome.storage.local.set({
+    draft: item.prompt,
+    aspect: $('#aspect').value,
+    resolution: $('#resolution').value,
+    outputFormat: $('#outputFormat').value
+  });
   $('#prompt').focus();
   window.scrollTo({ top: 0 });
 }

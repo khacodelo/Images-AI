@@ -13,6 +13,64 @@ const DEFAULTS = {
 
 const send = (msg) => chrome.runtime.sendMessage(msg);
 
+// ───────────────────────── Đoạn văn bản đang bôi đen trên trang ─────────────────────────
+const MAX_PROMPT = 4000;
+function clip(text) {
+  let t = text.slice(0, MAX_PROMPT);
+  if (/[\uD800-\uDBFF]$/.test(t)) t = t.slice(0, -1); // không cắt đôi ký tự emoji
+  return t;
+}
+
+// Đọc đoạn đang chọn ở tab hiện tại (cần quyền activeTab + scripting).
+// Trang hệ thống (chrome://, Web Store…) không cho đọc → trả về chuỗi rỗng.
+async function getPageSelection() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return '';
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      func: () => {
+        try {
+          const sel = String(window.getSelection?.() ?? '');
+          if (sel.trim()) return sel;
+          const a = document.activeElement; // bôi đen bên trong ô nhập liệu
+          if (a && typeof a.selectionStart === 'number' && a.selectionEnd > a.selectionStart) {
+            return a.value.slice(a.selectionStart, a.selectionEnd);
+          }
+        } catch { /* bỏ qua */ }
+        return '';
+      }
+    });
+    return results
+      .map((r) => (r.result || '').trim())
+      .reduce((best, t) => (t.length > best.length ? t : best), '');
+  } catch {
+    return '';
+  }
+}
+
+function setPromptFromSelection(raw) {
+  const text = clip(raw);
+  $('#prompt').value = text;
+  chrome.storage.local.set({ draft: text });
+  const note = $('#selNote');
+  note.hidden = false;
+  note.textContent = raw.length > MAX_PROMPT
+    ? `Đã lấy đoạn chọn trên trang và cắt còn ${MAX_PROMPT} ký tự (gốc ${raw.length}).`
+    : `Đã lấy ${raw.length} ký tự từ đoạn đang chọn trên trang.`;
+}
+
+// Mở popup: nếu có đoạn mới được bôi đen (khác lần trước) thì điền vào ô mô tả.
+async function applyPageSelection(job) {
+  if (ACTIVE.includes(job?.state)) return;
+  const raw = await getPageSelection();
+  if (!raw) return;
+  const { lastSelection } = await chrome.storage.session.get('lastSelection');
+  if (raw === lastSelection) return;
+  await chrome.storage.session.set({ lastSelection: raw });
+  setPromptFromSelection(raw);
+}
+
 function render(job = { state: 'IDLE' }, preview) {
   const state = job.state;
   const chip = $('#chip');
@@ -66,6 +124,8 @@ async function init() {
   $('#aspect').value = s.aspect;
   $('#prompt').value = s.draft;
   if (!s.apiKey) $('#settings').open = true;
+  const { job } = await chrome.storage.session.get('job');
+  await applyPageSelection(job);
   await refresh();
 }
 
@@ -74,10 +134,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.history) renderHistory();
 });
 
-$('#prompt').addEventListener('input', (e) => chrome.storage.local.set({ draft: e.target.value }));
+$('#prompt').addEventListener('input', (e) => {
+  $('#selNote').hidden = true;
+  chrome.storage.local.set({ draft: e.target.value });
+});
 $('#aspect').addEventListener('change', (e) => chrome.storage.local.set({ aspect: e.target.value }));
 
 $('#generate').addEventListener('click', async () => {
+  if (!$('#prompt').value.trim()) { // ô trống → thử lấy đoạn đang bôi đen trên trang
+    const raw = await getPageSelection();
+    if (raw) setPromptFromSelection(raw);
+  }
   await chrome.storage.local.set({ aspect: $('#aspect').value });
   await send({ type: 'START', prompt: $('#prompt').value });
 });
